@@ -137,9 +137,72 @@ GET /tracked-bids
 
 Custom GPTs do not support a true visual like button inside the chat UI. The practical version is: have the GPT show each bid with its `bidId`, then use a prompt like `Like bid <bidId>` or `Track bid <bidId>`.
 
+## Send Liked Bids To Zoho CRM
+
+Use Zoho Flow as the bridge between this API and Zoho CRM.
+
+1. Open Zoho Flow.
+2. Create a new flow.
+3. Choose **Webhook** as the trigger.
+4. Copy the webhook URL Zoho gives you.
+5. Add an action: **Zoho CRM - Create Deal**.
+6. Map these incoming fields from the webhook payload:
+
+```text
+dealName
+stage
+source
+bidId
+solicitationNumber
+solicitationTitle
+solicitationUrl
+samUrl
+dueDate
+setAside
+score
+winChance
+endUser.email
+endUser.title
+endUser.firstName
+endUser.lastName
+endUser.phone
+billingAddress.street
+billingAddress.city
+billingAddress.state
+billingAddress.postalCode
+shippingAddress.street
+shippingAddress.city
+shippingAddress.state
+shippingAddress.postalCode
+```
+
+7. Optional but recommended: add Zoho CRM task actions using the `reminders` array for:
+   - 1 week before due
+   - 3 days before due
+   - 1 day before due
+
+8. In Render, open this API service.
+9. Go to **Environment**.
+10. Add this environment variable:
+
+```text
+ZOHO_FLOW_WEBHOOK_URL=PASTE_YOUR_ZOHO_FLOW_WEBHOOK_URL_HERE
+```
+
+11. Redeploy the Render service.
+
+After that, whenever you tell the GPT `Like bid <bidId>`, the API will:
+
+- Save the bid in memory.
+- Extract the end user.
+- Extract email, first name, last name, phone, billing address, and shipping address when available.
+- Send a Zoho-ready Deal payload to Zoho Flow.
+- Return the Zoho sync status.
+
 ## Environment Variables
 
 ```text
 PORT=3000
 MYBIDMATCH_URL=https://mybidmatch.outreachsystems.com/go?sub=4C27AA86-1FA5-4B03-BD02-6FFE6148C080
+ZOHO_FLOW_WEBHOOK_URL=
 ```

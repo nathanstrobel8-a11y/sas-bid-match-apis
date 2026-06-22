@@ -152,7 +152,7 @@ paths:
     post:
       operationId: likeBid
       summary: Like and track a bid opportunity
-      description: Saves a bid from the most recent analysis memory and creates due-date reminder dates for one week, three days, and one day before it is due.
+      description: Saves a bid from memory, extracts end-user/contact/address details, creates due-date reminder dates, and sends a Zoho-ready deal payload when ZOHO_FLOW_WEBHOOK_URL is configured.
       requestBody:
         required: true
         content:
@@ -170,6 +170,9 @@ paths:
                 notes:
                   type: string
                   description: Optional user notes about why this bid was liked.
+                sendToZoho:
+                  type: boolean
+                  description: Whether to send the liked bid to the Zoho Flow webhook. Defaults to true.
       responses:
         "200":
           description: Saved tracking record and reminder dates.
@@ -183,6 +186,10 @@ paths:
                   message:
                     type: string
                   trackedBid:
+                    type: object
+                  zohoDealPayload:
+                    type: object
+                  zohoSync:
                     type: object
   /tracked-bids:
     get:
