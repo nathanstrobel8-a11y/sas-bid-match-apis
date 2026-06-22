@@ -227,7 +227,10 @@ async function sendToZohoFlow(payload, webhookUrl = ZOHO_FLOW_WEBHOOK_URL) {
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      payload,
+      ...payload
+    })
   });
   const responseText = await response.text();
   return {
