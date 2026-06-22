@@ -224,18 +224,30 @@ async function sendToZohoFlow(payload, webhookUrl = ZOHO_FLOW_WEBHOOK_URL) {
       message: "No ZOHO_FLOW_WEBHOOK_URL is set. Add your Zoho Flow webhook URL in Render environment variables."
     };
   }
-  const response = await fetch(webhookUrl, {
+  const body = JSON.stringify({
+    payload,
+    ...payload
+  });
+  const postWebhook = (url) => fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      payload,
-      ...payload
-    })
+    body
   });
-  const responseText = await response.text();
+
+  let response = await postWebhook(webhookUrl);
+  let responseText = await response.text();
+  let retriedDebugUrl = false;
+
+  if (response.status === 410 && webhookUrl.includes("isdebug=false")) {
+    retriedDebugUrl = true;
+    response = await postWebhook(webhookUrl.replace("isdebug=false", "isdebug=true"));
+    responseText = await response.text();
+  }
+
   return {
     sent: response.ok,
     status: response.status,
+    retriedDebugUrl,
     response: truncate(responseText, 500)
   };
 }
