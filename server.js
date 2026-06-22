@@ -728,6 +728,29 @@ function trackedBids() {
   return loadMemory().trackedBids || [];
 }
 
+async function testZohoFlow() {
+  const samplePayload = buildZohoDealPayload({
+    bidId: "test-zoho-flow",
+    number: "TEST",
+    title: "TEST - MyBidMatch Zoho Flow Connection",
+    agency: "TEST AGENCY, TEST OFFICE, 123 TEST STREET, MINNEAPOLIS MN 55401",
+    pointOfContact: "Test Contact, test@example.com, tel:6125551212",
+    url: "https://sas-bid-match-api.onrender.com",
+    samUrl: "https://sam.gov",
+    dueDate: "2026-06-30",
+    score: 99,
+    winChance: "high",
+    setAside: "Test Set-Aside",
+    notes: "This is a test payload from the SAS Bid Match API."
+  });
+  return {
+    ok: true,
+    webhookConfigured: Boolean(ZOHO_FLOW_WEBHOOK_URL),
+    zohoDealPayload: samplePayload,
+    zohoSync: await sendToZohoFlow(samplePayload)
+  };
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -779,6 +802,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/tracked-bids" && req.method === "GET") {
       return sendJson(res, 200, { trackedBids: trackedBids() });
     }
+    if (url.pathname === "/test-zoho" && ["GET", "POST"].includes(req.method)) {
+      return sendJson(res, 200, await testZohoFlow());
+    }
     return sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     return sendJson(res, 500, {
@@ -803,6 +829,7 @@ module.exports = {
   findDayLink,
   previousDateIso,
   buildZohoDealPayload,
+  testZohoFlow,
   likeBid,
   scoreOpportunity,
   server
