@@ -1,0 +1,202 @@
+openapi: 3.1.0
+info:
+  title: SAS Bid Match API
+  version: 1.0.0
+  description: Ranks MyBidMatch solicitations against Superior Access Solutions capabilities and vendor channels.
+servers:
+  - url: https://YOUR-DOMAIN-HERE
+paths:
+  /analyze-bids:
+    get:
+      operationId: analyzeBids
+      summary: Find the best solicitations for SAS to bid on
+      description: Fetches MyBidMatch, opens yesterday's listing unless a date is supplied, and returns the strongest opportunities.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Optional date to analyze in YYYY-MM-DD format. Defaults to yesterday.
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+        - name: top
+          in: query
+          required: false
+          description: Number of ranked opportunities to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        "200":
+          description: Ranked bid opportunities.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sourceUrl:
+                    type: string
+                  dayUrl:
+                    type: string
+                  targetDate:
+                    type: string
+                  targetDateLabel:
+                    type: string
+                  companyProfile:
+                    type: string
+                  descriptionLengthMax:
+                    type: integer
+                    const: 300
+                  opportunities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bidId:
+                          type: string
+                        number:
+                          type: string
+                        title:
+                          type: string
+                        agency:
+                          type: string
+                        dueDate:
+                          type: string
+                        pointOfContact:
+                          type: string
+                        setAside:
+                          type: string
+                        url:
+                          type: string
+                        samUrl:
+                          type: string
+                        score:
+                          type: integer
+                        winChance:
+                          type: string
+                          enum: [high, medium-high, medium, low]
+                        reasons:
+                          type: array
+                          items:
+                            type: string
+                        risks:
+                          type: array
+                          items:
+                            type: string
+                        description:
+                          type: string
+                          maxLength: 300
+                  analysis:
+                    type: object
+                    properties:
+                      title:
+                        type: string
+                      priorityTable:
+                        type: array
+                        items:
+                          type: object
+                      carefulWith:
+                        type: array
+                        items:
+                          type: object
+                      quickWins:
+                        type: array
+                        items:
+                          type: object
+                      strategicPursuits:
+                        type: array
+                        items:
+                          type: object
+                      doNotWasteTimeFirst:
+                        type: array
+                        items:
+                          type: object
+                      finalBidPriorityList:
+                        type: object
+                      nextMove:
+                        type: string
+                  message:
+                    type: string
+        "500":
+          description: MyBidMatch could not be reached or parsed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  detail:
+                    type: string
+                  nextStep:
+                    type: string
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check whether the API is running
+      responses:
+        "200":
+          description: API health status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  service:
+                    type: string
+  /like-bid:
+    post:
+      operationId: likeBid
+      summary: Like and track a bid opportunity
+      description: Saves a bid from the most recent analysis memory and creates due-date reminder dates for one week, three days, and one day before it is due.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bidId]
+              properties:
+                bidId:
+                  type: string
+                  description: The bidId returned by analyzeBids.
+                date:
+                  type: string
+                  description: Optional analysis date in YYYY-MM-DD format.
+                notes:
+                  type: string
+                  description: Optional user notes about why this bid was liked.
+      responses:
+        "200":
+          description: Saved tracking record and reminder dates.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  trackedBid:
+                    type: object
+  /tracked-bids:
+    get:
+      operationId: getTrackedBids
+      summary: Get liked and tracked bids
+      responses:
+        "200":
+          description: Liked bids stored in API memory.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trackedBids:
+                    type: array
+                    items:
+                      type: object
