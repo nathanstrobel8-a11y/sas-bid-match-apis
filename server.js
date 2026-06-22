@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT || 3000);
 const SOURCE_URL =
   process.env.MYBIDMATCH_URL ||
   "https://mybidmatch.outreachsystems.com/go?sub=4C27AA86-1FA5-4B03-BD02-6FFE6148C080";
+const ZOHO_FLOW_WEBHOOK_URL = process.env.ZOHO_FLOW_WEBHOOK_URL || "";
 const MAX_DESCRIPTION_LENGTH = 300;
 const profile = JSON.parse(
   fs.readFileSync(path.join(__dirname, "data", "company-profile.json"), "utf8")
@@ -98,6 +99,142 @@ function contactSummary(text) {
     .replace(/\s+/g, " ")
     .trim();
   return truncate(summary || clean, 320);
+}
+
+function extractEmail(text) {
+  return String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || "";
+}
+
+function extractPhone(text) {
+  const tel = String(text || "").match(/\btel:\s*(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})\b/i)?.[1];
+  const plain = String(text || "").match(/\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/)?.[0];
+  return (tel || plain || "").replace(/\s+/g, "-");
+}
+
+function extractPersonName(text) {
+  const clean = String(text || "")
+    .replace(/\btel:\s*\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/gi, " ")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const beforeComma = clean.split(",")[0].trim();
+  const parts = beforeComma
+    .split(/\s+/)
+    .filter((part) => /^[A-Za-z'.-]+$/.test(part))
+    .filter((part) => !["POC", "Phone", "Email"].includes(part));
+  if (parts.length >= 2) {
+    return {
+      firstName: parts[0],
+      lastName: parts.slice(1).join(" ")
+    };
+  }
+  return { firstName: "", lastName: "" };
+}
+
+function parseEndUserAddress(agencyText) {
+  const parts = String(agencyText || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const stateZipIndex = parts.findIndex((part) => /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(part));
+  if (stateZipIndex < 0) {
+    return {
+      agencyName: parts.slice(0, 3).join(", "),
+      street: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "USA",
+      fullAddress: ""
+    };
+  }
+
+  const stateZip = parts[stateZipIndex].match(/\b([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/);
+  const street = parts[stateZipIndex - 1] || "";
+  const city = parts[stateZipIndex].replace(/\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/, "").trim();
+  const agencyName = parts.slice(0, Math.max(0, stateZipIndex - 1)).join(", ");
+  const address = {
+    agencyName,
+    street,
+    city,
+    state: stateZip?.[1] || "",
+    postalCode: stateZip?.[2] || "",
+    country: "USA"
+  };
+  address.fullAddress = [address.street, address.city, address.state, address.postalCode, address.country]
+    .filter(Boolean)
+    .join(", ");
+  return address;
+}
+
+function buildZohoDealPayload(bid) {
+  const contact = bid.pointOfContact || "";
+  const person = extractPersonName(contact);
+  const address = parseEndUserAddress(bid.agency);
+  const email = extractEmail(contact);
+  const phone = extractPhone(contact);
+  const dealName = truncate(`${bid.title} - ${address.agencyName || bid.agency || "Government End User"}`, 120);
+
+  return {
+    dealName,
+    stage: "Qualification",
+    source: "MyBidMatch",
+    bidId: bid.bidId,
+    solicitationNumber: bid.number,
+    solicitationTitle: bid.title,
+    solicitationUrl: bid.url,
+    samUrl: bid.samUrl,
+    dueDate: bid.dueDate,
+    dueTime: bid.dueTime,
+    setAside: bid.setAside,
+    score: bid.score,
+    winChance: bid.winChance,
+    notes: bid.notes || "",
+    endUser: {
+      agencyName: address.agencyName || bid.agency || "",
+      email,
+      title: bid.title,
+      firstName: person.firstName,
+      lastName: person.lastName,
+      phone,
+      pointOfContact: contact
+    },
+    billingAddress: {
+      street: address.street,
+      city: address.city,
+      state: address.state,
+      postalCode: address.postalCode,
+      country: address.country
+    },
+    shippingAddress: {
+      street: address.street,
+      city: address.city,
+      state: address.state,
+      postalCode: address.postalCode,
+      country: address.country
+    },
+    reminders: reminderDates(bid.dueDate)
+  };
+}
+
+async function sendToZohoFlow(payload, webhookUrl = ZOHO_FLOW_WEBHOOK_URL) {
+  if (!webhookUrl) {
+    return {
+      sent: false,
+      message: "No ZOHO_FLOW_WEBHOOK_URL is set. Add your Zoho Flow webhook URL in Render environment variables."
+    };
+  }
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const responseText = await response.text();
+  return {
+    sent: response.ok,
+    status: response.status,
+    response: truncate(responseText, 500)
+  };
 }
 
 function dateLabels(isoDate) {
@@ -530,7 +667,7 @@ async function analyzeBids({ date, top }) {
   return result;
 }
 
-function likeBid({ bidId, date, notes }) {
+async function likeBid({ bidId, date, notes, sendToZoho = true }) {
   const memory = loadMemory();
   const analyses = date ? { [date]: memory.analyses[date] } : memory.analyses;
   const found = Object.entries(analyses)
@@ -547,15 +684,30 @@ function likeBid({ bidId, date, notes }) {
     };
   }
 
-  const tracked = {
+  const trackedBase = {
     ...found,
     likedAt: new Date().toISOString(),
     status: "liked",
     notes: notes || "",
-    reminders: reminderDates(found.dueDate),
+    reminders: reminderDates(found.dueDate)
+  };
+  const zohoDealPayload = buildZohoDealPayload(trackedBase);
+  const zohoSync = sendToZoho ? await sendToZohoFlow(zohoDealPayload) : { sent: false, message: "Zoho sync skipped." };
+
+  const tracked = {
+    ...trackedBase,
+    zohoDealPayload,
+    zohoSync,
     endUserInfo: {
       agency: found.agency,
       pointOfContact: found.pointOfContact,
+      email: zohoDealPayload.endUser.email,
+      title: zohoDealPayload.endUser.title,
+      firstName: zohoDealPayload.endUser.firstName,
+      lastName: zohoDealPayload.endUser.lastName,
+      phone: zohoDealPayload.endUser.phone,
+      billingAddress: zohoDealPayload.billingAddress,
+      shippingAddress: zohoDealPayload.shippingAddress,
       dueDate: found.dueDate,
       dueTime: found.dueTime,
       setAside: found.setAside,
@@ -569,7 +721,7 @@ function likeBid({ bidId, date, notes }) {
     ...memory.trackedBids.filter((bid) => bid.bidId !== bidId)
   ];
   saveMemory(memory);
-  return { ok: true, trackedBid: tracked };
+  return { ok: true, trackedBid: tracked, zohoDealPayload, zohoSync };
 }
 
 function trackedBids() {
@@ -622,7 +774,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/like-bid" && req.method === "POST") {
       const body = await parseBody(req);
-      return sendJson(res, 200, likeBid(body));
+      return sendJson(res, 200, await likeBid(body));
     }
     if (url.pathname === "/tracked-bids" && req.method === "GET") {
       return sendJson(res, 200, { trackedBids: trackedBids() });
@@ -650,6 +802,7 @@ module.exports = {
   extractOpportunities,
   findDayLink,
   previousDateIso,
+  buildZohoDealPayload,
   likeBid,
   scoreOpportunity,
   server
